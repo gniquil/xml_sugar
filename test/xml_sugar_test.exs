@@ -152,8 +152,6 @@ defmodule XmlSugarTest do
     assert result == ['Content Header']
     assert XmlSugar.at_css(@xml_doc, "#content *:first-child").text == 'Content Header'
     assert XmlSugar.css(@xml_doc, "#content li:last-child") |> Enum.map &(&1.text) == ['Ten']
-    XmlSugar.css(@xml_doc, "#content li:last-child")
-      |> Enum.map fn (node) -> IO.puts node end
   end
 
   test "[css] :nth-child even" do
