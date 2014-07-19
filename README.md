@@ -8,6 +8,142 @@ This is a simple Elixir sugar wrapper around `:xmerl`. What it adds is css selec
 Given a xml document such as below
 
 ```xml
+<?xml version="1.05" encoding="UTF-8"?>
+<game>
+  <matchups>
+    <matchup winner-id="1">
+      <name>Match One</name>
+      <teams>
+        <team>
+          <id>1</id>
+          <name>Team One</name>
+        </team>
+        <team>
+          <id>2</id>
+          <name>Team Two</name>
+        </team>
+      </teams>
+    </matchup>
+    <matchup winner-id="2">
+      <name>Match Two</name>
+      <teams>
+        <team>
+          <id>2</id>
+          <name>Team Two</name>
+        </team>
+        <team>
+          <id>3</id>
+          <name>Team Three</name>
+        </team>
+      </teams>
+    </matchup>
+    <matchup winner-id="1">
+      <name>Match Three</name>
+      <teams>
+        <team>
+          <id>1</id>
+          <name>Team One</name>
+        </team>
+        <team>
+          <id>3</id>
+          <name>Team Three</name>
+        </team>
+      </teams>
+    </matchup>
+  </matchups>
+</game>
+```
+We can do the following
+
+```elixir
+result = xml_doc # as defined above
+|> XmlSugar.to_map(
+  "matchups[]": [
+    "//matchups/matchup",
+    "&name": "./name/text()",
+    winner: [
+      ".//team/id[.=ancestor::matchup/@winner-id]/..",
+      "&name": "./name/text()"
+    ]
+  ]
+)
+
+assert result == %{
+  matchups: [
+    %{name: 'Game One', winner: %{name: 'Team One'}},
+    %{name: 'Game Two', winner: %{name: 'Team Two'}},
+    %{name: 'Game Three', winner: %{name: 'Team One'}}
+  ]
+}
+
+# or something simple... get the list of match names
+result = xml_doc |> XmlSugar.to_list_of_values("//matchup/name/text()")
+assert result == ['Match One', 'Match Two', 'Match Three']
+
+```
+
+## How to Use
+
+### Overview
+
+Generally, all you need to do is use `to_map/2` as follows `to_map(doc, spec)` where `doc` is a string, char_list, or xml record
+as specified in `:xmerl`. `to_map/2` returns a `map`.
+
+### Mapping from xml to Map
+
+The second argument to `to_map/2`, should be a keyword list that can be in either of the following formats:
+
+```elixir
+XmlSugar.to_map(doc, label1: path1) # where label is a string or atom and path is a xpath string
+
+XmlSugar.to_map(doc, label1: [path1, label11: path11, label12: path12, ...]) # where label is a string or atom and path is a string
+```
+
+The structure above can be nested arbitrarily deep.
+
+### Label Types
+
+As you saw earlier, the labels have strange symbols `&` and `[]`. This is to help us specify what type of result the mapping
+will return.
+
+- `&...` indicates value. Without this, mapping will return tuples that conform to Record definitions specified in xmerl. Note
+that `&` is only valid if the path correspond to `xmlText`, `xmlComment`, `xmlPI`, `xmlAttribute`. This is why as shown above,
+you need to use "./text()" to pull out the text node to use with `&`. Also you may want to try "./@some-attr" with `&` to get
+the value of the attributes.
+
+- `...[]` indicates list. With out this, you will only get the first node of the matched nodes.
+
+## API
+
+### `to_map/2`
+
+This is the main function, probably the only one you'll ever need. Explained above.
+
+### Helper Methods
+
+In case you are lazy, you can use the following to get to what you want without dealing with `map`
+
+#### `to_node/2`
+
+same as `doc |> to_map("temp": spec) |> Map.get(:temp)`
+
+#### `to_value/2`
+
+same as `doc |> to_map("&temp": spec) |> Map.get(:temp)`
+
+#### `to_list/2`
+
+same as `doc |> to_map("temp[]": spec) |> Map.get(:temp)`
+
+#### `to_list_of_values/2`
+
+same as `doc |> to_map("&temp[]": spec) |> Map.get(:temp)`
+
+
+## Examples
+
+```xml
+<?xml version="1.05" encoding="UTF-8"?>
 <html>
   <head>
     <title>XML Parsing</title>
@@ -36,152 +172,62 @@ Given a xml document such as below
       <span class="badge">Eight</span>
       <span class="badge">Nine</span>
       <span class="badge">Ten</span>
+      <p class='nested-paragraph'>Hello there. <a>link</a></p>
+      <p class="padded-paragraph">Another one. <a>link2</a> More stuff</p>
     </div>
+    <special_match_key>first star</special_match_key>
   </body>
 </html>
 ```
-We can do the following
 
 ```iex
-iex> doc = ...[defined above]...
+iex> doc = ... # as above
 iex> import XmlSugar
-iex> xpath(doc, "//li[@class='second']") |> Enum.map &(&1.text)
-['Second']
-iex> at_xpath(doc, "//li[@class='second']").text
-'Second'
-iex> css(doc, "li") |> Enum.map &(&1.text)
-['First', 'Second', 'Third', 'Forth']
-iex> at_css(doc, '#content .badge:first-child').text
-'One'
-```
 
-## Specifics
-
-To be more specific, both `xpath` and `css` returns a list of `XmlSugar.Element` or
-`XmlSugar.Text`, both of which has a convenient accessor `.text`. If the current node is a text node or it has only singular text node child, then `.text` will contain the text value.
-
-```iex
-iex> XmlSugar.css(doc, ".badge.odd")
-[%XmlSugar.Element{attributes: [%XmlSugar.Attribute{entity_type: :xmlAttribute,
-    expanded_name: [], language: [], name: :class, namespace: [],
-    normalized: false, nsinfo: [], parents: [span: 4, div: 8, body: 4, html: 1],
-    pos: 1, value: 'first badge odd'},
-   %XmlSugar.Attribute{entity_type: :xmlAttribute, expanded_name: [],
-    language: [], name: :"data-attr", namespace: [], normalized: false,
-    nsinfo: [], parents: [span: 4, div: 8, body: 4, html: 1], pos: 2,
-    value: 'first-half'}],
-  content: [%XmlSugar.Text{entity_type: :xmlText,
-    parents: [span: 4, div: 8, body: 4, html: 1], pos: 1, type: :text,
-    value: 'One'}], entity_type: :xmlElement, expanded_name: :span, name: :span,
-  parents: [div: 8, body: 4, html: 1], pos: 4, text: 'One'},
- %XmlSugar.Element{attributes: [%XmlSugar.Attribute{entity_type: :xmlAttribute,
-    expanded_name: [], language: [], name: :class, namespace: [],
-    normalized: false, nsinfo: [], parents: [span: 8, div: 8, body: 4, html: 1],
-    pos: 1, value: 'badge odd'},
-   %XmlSugar.Attribute{entity_type: :xmlAttribute, expanded_name: [],
-    language: [], name: :"data-attr", namespace: [], normalized: false,
-    nsinfo: [], parents: [span: 8, div: 8, body: 4, html: 1], pos: 2,
-    value: 'first-half'}],
-  content: [%XmlSugar.Text{entity_type: :xmlText,
-    parents: [span: 8, div: 8, body: 4, html: 1], pos: 1, type: :text,
-    value: 'Three'}], entity_type: :xmlElement, expanded_name: :span,
-  name: :span, parents: [div: 8, body: 4, html: 1], pos: 8, text: 'Three'}]
-```
-
-
-`at_xpath` and `at_css` simply returns the first node of the result.
-
-Note that css selector is not a full implementation of the css3 selector. It is simply
-a select few of the commonly used ones transformed into xpath. Obviously xpath is
-limited to what's only available in :xmerl. Therefore xpath functions such as
-`ends-with`, `substring`, and many others are not available. Take a look at the tests
-to get a sense of what it can do.
-
-Below are some more examples
-
-```iex
-iex> import XmlSugar
-iex> xpath(@xml_doc, "//li/text()") |> Enum.map &(&1.value)
+iex> doc |> to_list_of_values("//li/text()")
 ['First', 'Second','Third', 'Forth']
-iex> xpath(@xml_doc, "//li[@class='second']/text()") |> Enum.map &(&1.value)
-['Second']
-iex> xpath(@xml_doc, "//li[2]/text()") |> Enum.map &(&1.value)
-['Second']
-iex> xpath(@xml_doc, "//li[last()]/text()") |> Enum.map &(&1.value)
-['Forth']
-iex> xpath(@xml_doc, "//li/text()") |> Enum.map &(&1.value)
-['First', 'Second', 'Third', 'Forth']
-iex> result = xpath(@xml_doc, "//li[@data-index]")
-[%XmlSugar.Element{attributes: [%XmlSugar.Attribute{entity_type: :xmlAttribute,
-    expanded_name: [], language: [], name: :class, namespace: [],
-    normalized: false, nsinfo: [], parents: [li: 2, ul: 4, body: 4, html: 1],
-    pos: 1, value: 'first star'},
-   %XmlSugar.Attribute{entity_type: :xmlAttribute, expanded_name: [],
-    language: [], name: :"data-index", namespace: [], normalized: false,
-    nsinfo: [], parents: [li: 2, ul: 4, body: 4, html: 1], pos: 2, value: '1'}],
-  content: [%XmlSugar.Text{entity_type: :xmlText,
-    parents: [li: 2, ul: 4, body: 4, html: 1], pos: 1, type: :text,
-    value: 'First'}], entity_type: :xmlElement, expanded_name: :li, name: :li,
-  parents: [ul: 4, body: 4, html: 1], pos: 2, text: 'First'}]
-iex> attributes = List.first(node_list).attributes |> Enum.map fn (attribute) -> attribute.value end
-['first star', '1']
-iex> xpath(@xml_doc, "//li") |> Enum.map &(&1.text)
-['First', 'Second', 'Third', 'Forth']
-iex> at_xpath(@xml_doc, "//title/text()").value
-'XML Parsing'
-iex> at_xpath(@xml_doc, "//li[1]").text
-'First'
-iex> at_xpath(@xml_doc, "//p").text
-'Neato'
-```
-and here's CSS
 
-```iex
-iex> import XmlSugar
-iex> css(@xml_doc, "li") |> Enum.map &(&1.text)
-['First', 'Second', 'Third', 'Forth']
-iex> css(@xml_doc, "div li") |> Enum.map &(&1.text)
-['Forth']
-iex> css(@xml_doc, "li.second") |> Enum.map &(&1.text)
-['Second']
-iex> at_css(@xml_doc, "li.second").text
+iex> doc |> to_value("//li[@class='second']/text()")
 'Second'
-iex> css(@xml_doc, ".second") |> Enum.map &(&1.text)
-['Second']
-iex> at_css(@xml_doc, ".second").text
-'Second'
-iex> css(@xml_doc, ".badge.odd") |> Enum.map &(&1.text)
-['One', 'Three']
-iex> at_css(@xml_doc, ".badge.odd").text
-'One'
-iex> css(@xml_doc, "li[data-index='1']") |> Enum.map &(&1.text)
-['First']
-iex> at_css(@xml_doc, "li[data-index='1']").text
-'First'
-iex> css(@xml_doc, "li[class*='s']") |> Enum.map &(&1.text)
-['First', 'Second']
-iex> css(@xml_doc, "li[data-index]") |> Enum.map &(&1.text)
-['First']
-iex> css(@xml_doc, "li.star[data-index='1']") |> Enum.map &(&1.text)
-['First']
-iex> css(@xml_doc, "div > ul > li") |> Enum.map &(&1.text)
-['Forth']
-iex> css(@xml_doc, "#content .badge:first-child") |> Enum.map &(&1.text)
-['One']
-iex> css(@xml_doc, "#content *:first-child") |> Enum.map &(&1.text)
-['Content Header']
-iex> at_css(@xml_doc, "#content *:first-child").text
-'Content Header'
-iex> css(@xml_doc, "#content li:last-child") |> Enum.map &(&1.text)
-['Ten']
-iex> css(@xml_doc, ".badge:nth-child(even)") |> Enum.map &(&1.text)
-['Two', 'Four', 'Six', 'Eight', 'Ten']
-iex> css(@xml_doc, ".badge:nth-child(odd)") |> Enum.map &(&1.text)
-['One', 'Three', 'Five', 'Seven', 'Nine']
-iex> css(@xml_doc, "*[data-attr~='first-half']") |> Enum.map &(&1.text)
-['One', 'Two', 'Three', 'Four', 'Five']
-iex> css(@xml_doc, "*[class~='first']") |> Enum.map &(&1.text)
-['First', 'One']
+
+iex> doc |> to_node("//li[2]/text()")
+{:xmlText, [li: 4, ul: 4, body: 4, html: 1], 1, [], 'Second', :text}
+
+iex> doc |> to_map("&list_of_items[]": "//li/text()")
+%{list_of_items: ['First', 'Second', 'Third', 'Forth']}
+
+iex> doc |> to_map(
+...>  "html": [
+...>    "//html",
+...>    "body": [
+...>      "./body",
+...>      "&p": "./p[1]/text()",
+...>      "first_list[]": [
+...>        "./ul/li",
+...>        "&class": "./@class",
+...>        "&data_attr": "./@data-attr",
+...>        "&text": "./text()"
+...>      ],
+...>      "&second_list[]": "./div//li/text()"
+...>    ]
+...>  ],
+...>  "&odd_badges_class_values[]": "//span[contains(@class, 'odd')]/@class",
+...>  "&special_match": "//li[@class=ancestor::body/special_match_key]/text()"
+...>)
+%{
+  html: %{
+    body: %{
+      p: 'Neato',
+      first_list: [
+        %{class: 'first star', data_attr: nil, text: 'First'},
+        %{class: 'second', data_attr: nil, text: 'Second'},
+        %{class: 'third', data_attr: nil, text: 'Third'}
+      ],
+      second_list: ['Forth']
+    }
+  },
+  odd_badges_class_values: ['first badge odd', 'badge odd'],
+  special_match: 'First'
+}
 
 ```
-

@@ -1,10 +1,7 @@
 defmodule XmlSugarTest do
   use ExUnit.Case, async: true
-  require XmlSugar
   import XmlSugar
   require Record
-  import List, only: [first: 1]
-  import TestHelpers
 
   setup do
     simple = File.read!("./test/files/simple.xml")
@@ -18,340 +15,369 @@ defmodule XmlSugarTest do
     assert xmlElement(result, :name) == :html
   end
 
-  test "[xpath] get list of text nodes", %{simple: doc} do
-    result = doc |> parse |> xpath("//li/text()") |> value
-    assert result == ['First', 'Second','Third', 'Forth']
+  test "spec processing modifiers" do
+    assert process_spec(first_p: "//p") == [first_p: [path: '//p', is_list: false, is_value: false, children: []]]
+    assert process_spec("&first_p": "//p") == [first_p: [path: '//p', is_list: false, is_value: true, children: []]]
+    assert process_spec("first_p[]": "//p") == [first_p: [path: '//p', is_list: true, is_value: false, children: []]]
+    assert process_spec("&first_p[]": "//p") == [first_p: [path: '//p', is_list: true, is_value: true, children: []]]
   end
 
-  test "[xpath] get list of text nodes with attribute filter", %{simple: doc} do
-    result = doc |> parse |> xpath("//li[@class='second']/text()") |> value
-    assert result == ['Second']
+  test "spec processing nested" do
+    result = process_spec(
+      "&first_p[]": [
+        "//p",
+        "&name": "./name",
+        "&key": "./key"
+      ],
+      "&second_p": "//p/text()",
+      "third_p": [
+        "//p",
+        "teams[]": [
+          ".//team",
+          "&name": "./name/text()"
+        ]
+      ]
+    )
+
+    assert result == [
+      first_p: [
+        path: '//p',
+        is_list: true,
+        is_value: true,
+        children: [
+          name: [
+            path: './name',
+            is_list: false,
+            is_value: true,
+            children: []
+          ],
+          key: [
+            path: './key',
+            is_list: false,
+            is_value: true,
+            children: []
+          ]
+        ]
+      ],
+      second_p: [
+        path: '//p/text()',
+        is_list: false,
+        is_value: true,
+        children: []
+      ],
+      third_p: [
+        path: '//p',
+        is_list: false,
+        is_value: false,
+        children: [
+          teams: [
+            path: './/team',
+            is_list: true,
+            is_value: false,
+            children: [
+              name: [
+                path: './name/text()',
+                is_list: false,
+                is_value: true,
+                children: []
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
   end
 
-  test "[xpath] get list of text nodes with position filter", %{simple: doc} do
-    result = doc |> parse |> xpath("//li[2]/text()") |> value
-    assert result == ['Second']
+  test "to_map single level", %{simple: doc} do
+    result = doc
+    |> to_map("header": "//header/text()")
+    assert result == %{
+      header: {:xmlText, [header: 2, div: 8, body: 4, html: 1], 1, [], 'Content Header', :text}
+    }
+
+    result = doc
+    |> to_map("&header": "//header/text()")
+    assert result == %{header: 'Content Header'}
+
+    result = doc
+    |> to_map("&badges[]": "//span[contains(@class,'badge')][@data-attr='first-half']/text()")
+    assert result == %{
+      badges: ['One', 'Two', 'Three', 'Four', 'Five']
+    }
+
+    result = doc
+    |> to_map(
+      "&header": "//header/text()",
+      "&badges[]": "//span[contains(@class,'badge')][@data-attr='first-half']/text()"
+    )
+    assert result == %{
+      header: 'Content Header',
+      badges: ['One', 'Two', 'Three', 'Four', 'Five']
+    }
   end
 
-  test "[xpath] get list of text nodes with `last` filter", %{simple: doc} do
-    result = doc |> parse |> xpath("//li[last()]/text()") |> value
-    assert result == ['Forth']
+  test "to_map multiple level", %{simple: doc} do
+    result = doc
+    |> to_map(
+      "content": [
+        "//div[@id='content']",
+        "&badges[]": "//span[contains(@class,'badge')][@data-attr!='first-half']/text()"
+      ]
+    )
+    assert result == %{
+      content: %{
+        badges: ['Six', 'Seven', 'Eight', 'Nine', 'Ten']
+      }
+    }
+
+    result = doc
+    |> to_map(
+      "&header": "//header/text()",
+      "content": [
+        "//div[@id='content']",
+        "&first_non_first_half_badge": "//span[contains(@class,'badge')][@data-attr!='first-half']/text()"
+      ]
+    )
+    assert result == %{
+      header: 'Content Header',
+      content: %{
+        first_non_first_half_badge: 'Six'
+      }
+    }
+  end
+
+  test "reuse returned nodes", %{simple: doc} do
+    result = doc
+    |> to_map("list[]": "//li")
+    |> Map.get(:list)
+    |> Enum.map(fn (li_node) ->
+      to_map(li_node, "&text": "./text()") |> Map.get(:text)
+    end)
+    assert result == ['First', 'Second', 'Third', 'Forth']
   end
 
   test "working with attributes", %{simple: doc} do
     result = doc
-    |> parse
-    |> xpath("//body/ul/li")
-    |> value(class: "./@class", data_index: "./@data-index")
-    assert result == [
-      [class: 'first star', data_index: '1'],
-      [class: 'second', data_index: nil],
-      [class: 'third', data_index: nil]
-    ]
+    |> to_map(
+      "list[]": [
+        "//body/ul/li",
+        "&class": "./@class",
+        "&data_index": "./@data-index"
+      ]
+    )
+    assert result == %{
+      list: [
+        %{class: 'first star', data_index: '1'},
+        %{class: 'second', data_index: nil},
+        %{class: 'third', data_index: nil}
+      ]
+    }
 
     result = doc
-    |> parse
-    |> xpath("//body/ul/li/@data-index/..")
-    |> value(class: "./@class", data_index: "./@data-index")
-    assert result == [
-      [class: 'first star', data_index: '1']
-    ]
+    |> to_map(
+      list_item_with_data_index: [
+        "//body/ul/li/@data-index/..",
+        "&class": "./@class",
+        "&data_index": "./@data-index"
+      ]
+    )
+    assert result == %{
+      list_item_with_data_index: %{class: 'first star', data_index: '1'}
+    }
   end
 
-  test "get the first element of a list", %{simple: doc} do
-    result = doc
-    |> parse
-    |> at_xpath("//title/text()")
-    |> value
-    assert result == 'XML Parsing'
+  test "convenience functions", %{simple: doc} do
+    result = doc |> to_node("//header/text()")
+    assert result == {:xmlText, [header: 2, div: 8, body: 4, html: 1], 1, [], 'Content Header', :text}
 
-    result = doc
-    |> parse
-    |> at_xpath("//li[1]/text()")
-    |> value
-    assert result == 'First'
-
-    result = doc
-    |> parse
-    |> at_xpath("//p/text()")
-    |> value
-    assert result == 'Neato'
-
-    result = doc
-    |> parse
-    |> xpath("//p/text()")
-    |> first
-    |> value
-    assert result == 'Neato'
-  end
-
-  test "xpath descending", %{simple: doc} do
-    result = doc
-    |> parse
-    |> xpath("//div[@id=\"content\"]/p")
-    |> Enum.map(fn (p_node) ->
-      p_node
-      |> at_xpath("./a/text()")
-      |> value
-    end)
-    assert result == ['link', 'link2']
-  end
-
-  test "at_xpath and single value", %{simple: doc} do
-    result = doc
-    |> parse
-    |> at_xpath("//div[@id='content']/header/text()")
-    |> value
+    result = doc |> to_value("//header/text()")
     assert result == 'Content Header'
 
-    result = doc
-    |> parse
-    |> at_xpath("//div[@id='content']/p")
-    |> value(link: "./a/text()")
-    assert result == [link: 'link']
-
-    result = doc
-    |> parse
-    |> at_xpath("//div[@id='content']")
-    |> value(links: ".//a/text()")
-    assert result == [links: ['link', 'link2']]
-
-    result = doc
-    |> parse
-    |> at_xpath("//div[@id='content']")
-    |> value(links: ".//a")
+    result = doc |> to_list("//span[contains(@class,'badge')][@data-attr='first-half']/text()")
     assert result == [
-      links: [
-        {:xmlElement, :a, :a, [], {:xmlNamespace, [], []}, [p: 24, div: 8, body: 4, html: 1], 2, [], [{:xmlText, [a: 2, p: 24, div: 8, body: 4, html: 1], 1, [], 'link', :text}], [], :undefined, :undeclared},
-        {:xmlElement, :a, :a, [], {:xmlNamespace, [], []}, [p: 26, div: 8, body: 4, html: 1], 2, [], [{:xmlText, [a: 2, p: 26, div: 8, body: 4, html: 1], 1, [], 'link2', :text}], [], :undefined, :undeclared}
-      ]
+      {:xmlText, [span: 4, div: 8, body: 4, html: 1], 1, [], 'One', :text},
+      {:xmlText, [span: 6, div: 8, body: 4, html: 1], 1, [], 'Two', :text},
+      {:xmlText, [span: 8, div: 8, body: 4, html: 1], 1, [], 'Three', :text},
+      {:xmlText, [span: 10, div: 8, body: 4, html: 1], 1, [], 'Four', :text},
+      {:xmlText, [span: 12, div: 8, body: 4, html: 1], 1, [], 'Five', :text}
     ]
+
+    result = doc |> to_list_of_values("//span[contains(@class,'badge')][@data-attr='first-half']/text()")
+    assert result == ['One', 'Two', 'Three', 'Four', 'Five']
+
+
+    result = doc |> to_list("//li") |> Enum.map &(&1 |> to_value("./text()"))
+    assert result == ['First', 'Second', 'Third', 'Forth']
   end
 
-  test "nested xpath collection", %{simple: doc, complex: doc2} do
-
+  test "complex parsing", %{complex: doc} do
     result = doc
-    |> parse
-    |> value(first_list: "//body/ul", second_list: "//div/ul")
-    |> Enum.map(fn ({label, node}) ->
-      {label, node |> xpath("./li") |> value(text: "./text()", text2: "./text()")}
-    end)
-    assert result == [
-      first_list: [
-        [text: 'First', text2: 'First'],
-        [text: 'Second', text2: 'Second'],
-        [text: 'Third', text2: 'Third']
-      ],
-      second_list: [
-        [text: 'Forth', text2: 'Forth']
+    |> to_map(
+      "matchups[]": [
+        "//matchups/matchup/is_tied[contains(., '0')]/..",
+        "&week": "./week/text()",
+        "winner": [
+          "./teams/team/team_key[.=ancestor::matchup/winner_team_key]/..",
+          "&name": "./name/text()",
+          "&key": "./team_key/text()"
+        ],
+        "loser": [
+          "./teams/team/team_key[.!=ancestor::matchup/winner_team_key]/..",
+          "&name": "./name/text()",
+          "&key": "./team_key/text()"
+        ],
+        "teams[]": [
+          "./teams/team",
+          "&name": "./name/text()",
+          "&key": "./team_key/text()"
+        ]
       ]
-    ]
-
-    result = doc
-    |> parse
-    |> xpath("//div[@id='content']/p")
-    |> value(link: "./a/text()", text: "./text()")
-    assert result == [
-      [link: 'link', text: 'Hello there. '],
-      [link: 'link2', text: ['Another one. ', ' More stuff']]
-    ]
-
-    result = doc2
-    |> parse
-    |> xpath("//matchups/matchup/is_tied[contains(., '0')]/..")
-    |> value(
-      week: "./week/text()",
-      winner_team_key: "./winner_team_key/text()",
-      teams: "./teams/team"
     )
-    |> Enum.map(fn (matchup) ->
-      [
-        week: matchup[:week],
-        winner_team_key: matchup[:winner_team_key],
-        teams: matchup[:teams] |> value(name: "./name/text()", key: "./team_key/text()")
+    assert result == %{
+      matchups: [
+        %{
+          week: '16',
+          winner: %{name: 'Asgardian Warlords', key: '273.l.239541.t.1'},
+          loser: %{name: 'yourgoindown220', key: '273.l.239541.t.2'},
+          teams: [
+            %{name: 'Asgardian Warlords', key: '273.l.239541.t.1'},
+            %{name: 'yourgoindown220', key: '273.l.239541.t.2'}
+          ]
+        },
+        %{
+          week: '16',
+          winner: %{name: '187 she wrote', key: '273.l.239541.t.4'},
+          loser: %{name: 'bleedgreen', key: '273.l.239541.t.6'},
+          teams: [
+            %{name: '187 she wrote', key: '273.l.239541.t.4'},
+            %{name: 'bleedgreen', key: '273.l.239541.t.6'}
+          ]
+        },
+        %{
+          week: '16',
+          winner: %{name: 'jo momma', key: '273.l.239541.t.9'},
+          loser: %{name: 'Thunder Ducks', key: '273.l.239541.t.5'},
+          teams: [
+            %{name: 'Thunder Ducks', key: '273.l.239541.t.5'},
+            %{name: 'jo momma', key: '273.l.239541.t.9'}
+          ]
+        },
+        %{
+          week: '16',
+          winner: %{name: 'The Dude Abides', key: '273.l.239541.t.10'},
+          loser: %{name: 'bingo_door', key: '273.l.239541.t.8'},
+          teams: [
+            %{name: 'bingo_door', key: '273.l.239541.t.8'},
+            %{name: 'The Dude Abides', key: '273.l.239541.t.10'}
+          ]
+        }
       ]
-    end)
-    assert result == [
-      [
-        week: '16',
-        winner_team_key: '273.l.239541.t.1',
-        teams: [
-          [name: 'Asgardian Warlords', key: '273.l.239541.t.1'],
-          [name: 'yourgoindown220', key: '273.l.239541.t.2']
-        ]
-      ],
-      [
-        week: '16',
-        winner_team_key: '273.l.239541.t.4',
-        teams: [
-          [name: '187 she wrote', key: '273.l.239541.t.4'],
-          [name: 'bleedgreen', key: '273.l.239541.t.6']
-        ]
-      ],
-      [
-        week: '16',
-        winner_team_key: '273.l.239541.t.9',
-        teams: [
-          [name: 'Thunder Ducks', key: '273.l.239541.t.5'],
-          [name: 'jo momma', key: '273.l.239541.t.9']
-        ]
-      ],
-      [
-        week: '16',
-        winner_team_key: '273.l.239541.t.10',
-        teams: [
-          [name: 'bingo_door', key: '273.l.239541.t.8'],
-          [name: 'The Dude Abides', key: '273.l.239541.t.10']
-        ]
-      ]
-    ]
+    }
   end
 
-  test "complex", %{complex: doc} do
-    # a list of matches that have clear winner
-    # with matches having week, winner info, and loser info
+  test "complex parsing and processing", %{complex: doc} do
     result = doc
-    |> parse
-    |> xpath("//matchups/matchup/is_tied[contains(., '0')]/..")
-    |> value(
-      week: "./week/text()",
-      winner_team_key: "./winner_team_key/text()",
-      teams: "./teams/team"
-    )
-    |> Enum.map(fn (matchup) ->
-      teams = matchup[:teams]
-      |> value(name: "./name/text()", key: "./team_key/text()")
-
-      winner_team_key = matchup[:winner_team_key]
-
-      winner = teams |> Enum.find(fn (team) -> team[:key] == winner_team_key end)
-      loser = teams |> Enum.find(fn (team) -> team[:key] != winner_team_key end)
-      [
-        week: matchup[:week],
-        winner: winner,
-        loser: loser
+    |> to_list([
+      "//matchups/matchup/is_tied[contains(., '0')]/..",
+      "&week": "./week/text()",
+      "winner": [
+        "./teams/team/team_key[.=ancestor::matchup/winner_team_key]/..",
+        "&name": "./name/text()",
+        "&key": "./team_key/text()"
+      ],
+      "loser": [
+        "./teams/team/team_key[.!=ancestor::matchup/winner_team_key]/..",
+        "&name": "./name/text()",
+        "&key": "./team_key/text()"
+      ],
+      "teams[]": [
+        "./teams/team",
+        "&name": "./name/text()",
+        "&key": "./team_key/text()"
       ]
-    end)
-    |> tap(fn (result) ->
-      assert result == [
-        [
-          week: '16',
-          winner: [name: 'Asgardian Warlords', key: '273.l.239541.t.1'],
-          loser: [name: 'yourgoindown220', key: '273.l.239541.t.2']
-        ],
-        [
-          week: '16',
-          winner: [name: '187 she wrote', key: '273.l.239541.t.4'],
-          loser: [name: 'bleedgreen', key: '273.l.239541.t.6']
-        ],
-        [
-          week: '16',
-          winner: [name: 'jo momma', key: '273.l.239541.t.9'],
-          loser: [name: 'Thunder Ducks', key: '273.l.239541.t.5']
-        ],
-        [
-          week: '16',
-          winner: [name: 'The Dude Abides', key: '273.l.239541.t.10'],
-          loser: [name: 'bingo_door', key: '273.l.239541.t.8']
-        ]
-      ]
-    end)
-    |> Enum.reduce HashDict.new, fn (matchup, accumulator) ->
+    ])
+    |> Enum.reduce %{}, fn(matchup, stat) ->
       winner_name = matchup[:winner][:name]
       loser_name = matchup[:loser][:name]
-      unless HashDict.has_key?(accumulator, winner_name) do
-        accumulator = HashDict.put(accumulator, winner_name, %{wins: 0, loses: 0})
-      end
-      unless HashDict.has_key?(accumulator, loser_name) do
-        accumulator = HashDict.put(accumulator, loser_name, %{wins: 0, loses: 0})
-      end
+      stat = Map.put_new(stat, winner_name, %{wins: 0, loses: 0})
+      stat = Map.put_new(stat, loser_name, %{wins: 0, loses: 0})
 
-      {_, accumulator} = get_and_update_in(accumulator, [winner_name, :wins], &{&1, &1 + 1})
-      {_, accumulator} = get_and_update_in(accumulator, [loser_name, :loses], &{&1, &1 + 1})
+      {_, stat} = get_and_update_in(stat, [winner_name, :wins], &{&1, &1 + 1})
+      {_, stat} = get_and_update_in(stat, [loser_name, :loses], &{&1, &1 + 1})
 
-      accumulator
+      stat
     end
 
-    assert HashDict.to_list(result) == [
-      {'Asgardian Warlords', %{loses: 0, wins: 1}},
-      {'yourgoindown220', %{loses: 1, wins: 0}},
-      {'187 she wrote', %{loses: 0, wins: 1}},
-      {'Thunder Ducks', %{loses: 1, wins: 0}},
-      {'The Dude Abides', %{loses: 0, wins: 1}},
-      {'jo momma', %{loses: 0, wins: 1}},
-      {'bleedgreen', %{loses: 1, wins: 0}},
-      {'bingo_door', %{loses: 1, wins: 0}}
-    ]
+    assert result == %{
+      'Asgardian Warlords' => %{loses: 0, wins: 1},
+      'yourgoindown220' => %{loses: 1, wins: 0},
+      '187 she wrote' => %{loses: 0, wins: 1},
+      'Thunder Ducks' => %{loses: 1, wins: 0},
+      'The Dude Abides' => %{loses: 0, wins: 1},
+      'jo momma' => %{loses: 0, wins: 1},
+      'bleedgreen' => %{loses: 1, wins: 0},
+      'bingo_door' => %{loses: 1, wins: 0}
+    }
+  end
 
+  test "read me examples", %{simple: simple_doc} do
+    doc = File.read!("test/files/readme_example.xml")
     result = doc
-    |> parse
-    |> xpath("//matchups/matchup/is_tied[contains(., '0')]/..")
-    |> value(
-      week: "./week/text()",
-      winner: "./teams/team/team_key[.=ancestor::matchup/winner_team_key]/..",
-      loser: "./teams/team/team_key[.!=ancestor::matchup/winner_team_key]/.."
-    )
-    |> update(
-      winner: [name: "./name/text()", key: "./team_key/text()"],
-      loser: [name: "./name/text()", key: "./team_key/text()"]
-    )
-
-    assert result == [
-      [
-        week: '16',
-        winner: [name: 'Asgardian Warlords', key: '273.l.239541.t.1'],
-        loser: [name: 'yourgoindown220', key: '273.l.239541.t.2']
-      ],
-      [
-        week: '16',
-        winner: [name: '187 she wrote', key: '273.l.239541.t.4'],
-        loser: [name: 'bleedgreen', key: '273.l.239541.t.6']
-      ],
-      [
-        week: '16',
-        winner: [name: 'jo momma', key: '273.l.239541.t.9'],
-        loser: [name: 'Thunder Ducks', key: '273.l.239541.t.5']
-      ],
-      [
-        week: '16',
-        winner: [name: 'The Dude Abides', key: '273.l.239541.t.10'],
-        loser: [name: 'bingo_door', key: '273.l.239541.t.8']
+    |> XmlSugar.to_map(
+      "matchups[]": [
+        "//matchups/matchup",
+        "&name": "./name/text()",
+        winner: [
+          ".//team/id[.=ancestor::matchup/@winner-id]/..",
+          "&name": "./name/text()"
+        ]
       ]
-    ]
-  end
-
-  test "xpath simple values", %{simple: doc} do
-    result = doc
-    |> parse
-    |> xpath("//div[@id=\"content\"]/p/a/text()")
-    |> value
-    assert result == ['link', 'link2']
-
-    result = doc
-    |> parse
-    |> xpath("//div[@id=\"content\"]/p")
-    |> Enum.map(fn(p) -> xpath(p, "./text()") end)
-    |> Enum.map(fn(t) -> first(t) end)
-    |> value
-    assert result == ['Hello there. ', 'Another one. ']
-  end
-
-  test "xpath values with mapping", %{simple: doc} do
-    result = doc
-    |> parse
-    |> value(
-      header: "//div[@id=\"content\"]/header/text()",
-      first_badge: "//div[@id=\"content\"]/span[@class=\"first badge odd\"]/text()"
     )
-    assert result == [header: 'Content Header', first_badge: 'One']
 
-    result = doc
-    |> parse
-    |> xpath("//div[@id=\"content\"]")
-    |> value(
-      header: "./header/text()",
-      first_badge: "./span[@class=\"first badge odd\"]/text()"
+    assert result == %{
+      matchups: [
+        %{name: 'Match One', winner: %{name: 'Team One'}},
+        %{name: 'Match Two', winner: %{name: 'Team Two'}},
+        %{name: 'Match Three', winner: %{name: 'Team One'}}
+      ]
+    }
+
+    result = doc |> XmlSugar.to_list_of_values("//matchup/name/text()")
+    assert result == ['Match One', 'Match Two', 'Match Three']
+
+    result = simple_doc |> to_map(
+      "html": [
+        "//html",
+        "body": [
+          "./body",
+          "&p": "./p[1]/text()",
+          "first_list[]": [
+            "./ul/li",
+            "&class": "./@class",
+            "&data_attr": "./@data-attr",
+            "&text": "./text()"
+          ],
+          "&second_list[]": "./div//li/text()"
+        ]
+      ],
+      "&odd_badges_class_values[]": "//span[contains(@class, 'odd')]/@class",
+      "&special_match": "//li[@class=ancestor::body/special_match_key]/text()"
     )
-    assert result == [[header: 'Content Header', first_badge: 'One']]
+
+    assert result == %{
+      html: %{
+        body: %{
+          p: 'Neato',
+          first_list: [
+            %{class: 'first star', data_attr: nil, text: 'First'},
+            %{class: 'second', data_attr: nil, text: 'Second'},
+            %{class: 'third', data_attr: nil, text: 'Third'}
+          ],
+          second_list: ['Forth']
+        }
+      },
+      odd_badges_class_values: ['first badge odd', 'badge odd'],
+      special_match: 'First'
+    }
   end
 end

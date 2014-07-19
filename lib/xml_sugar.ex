@@ -1,4 +1,9 @@
 defmodule XmlSugar do
+  @moduledoc """
+  `XmlSugar` is a thin wrapper around `:xmerl`. It allows users to converts a string or xmlElement
+  record as defined in :xmerl to a map specified as an argment.
+  """
+
   require Record
   Record.defrecord :xmlDecl, Record.extract(:xmlDecl, from_lib: "xmerl/include/xmerl.hrl")
   Record.defrecord :xmlAttribute, Record.extract(:xmlAttribute, from_lib: "xmerl/include/xmerl.hrl")
@@ -10,38 +15,118 @@ defmodule XmlSugar do
   Record.defrecord :xmlPI, Record.extract(:xmlPI, from_lib: "xmerl/include/xmerl.hrl")
   Record.defrecord :xmlDocument, Record.extract(:xmlDocument, from_lib: "xmerl/include/xmerl.hrl")
 
-  import List, only: [first: 1]
 
+  @doc """
+  `doc` can be a char_list or string, but ultimately converts to char_list as it is required by :xmerl_scan
+
+  Return an `xmlElement` record
+  """
   def parse(doc) when is_bitstring(doc) do
     doc |> String.to_char_list |> parse
   end
-
   def parse(doc) do
     {parsed_doc, _} = :xmerl_scan.string(doc)
     parsed_doc
   end
 
-  def xpath(node, path) when is_bitstring(path) do
-    xpath(node, String.to_char_list(path))
+  @doc """
+  `label` has to be "&...", "...[]", "&...[]", or "..."
+  `&`: get the value of the node (only works when the node is `xmlText`, `xmlComment`, `xmlPI`, or `xmlAttribute`)
+  `[]`: returns a list of records for the given label
+
+  `path` is an xpath string. If it is nested, you can use the "./" or "../" syntax.
+
+  `subspec` is repeat of the same keyword list to allow nesting
+  """
+  def process_spec([{label, [path | subspec]}]) do
+    subspec = [
+      children: Enum.reduce(subspec, [], fn (spec, result) ->
+        result ++ process_spec([spec])
+      end)
+    ]
+    _process_spec(label, path, subspec)
   end
 
-  def xpath(collection, path) when is_list(collection) do
-    Enum.map(collection, fn (item) -> xpath(item, path) end)
+  def process_spec([{label, path}]) do
+    subspec = [children: []]
+    _process_spec(label, path, subspec)
   end
 
-  def xpath(node, path) do
-    :xmerl_xpath.string(path, node)
+  def process_spec(spec) do
+    Enum.reduce(spec, [], fn (item, result) -> result ++ process_spec([item]) end)
   end
 
-  def at_xpath(node, path) do
-    xpath(node, path) |> first
+  defp _process_spec(label, path, processed_subspec) do
+    label_str = Atom.to_string(label)
+    if String.match?(label_str, ~r/^\&/) do
+      processed_subspec = [{:is_value, true} | processed_subspec]
+      label_str = String.replace(label_str, ~r/^\&/, "")
+    else
+      processed_subspec = [{:is_value, false} | processed_subspec]
+    end
+    if String.match?(label_str, ~r/\[\]$/) do
+      processed_subspec = [{:is_list, true} | processed_subspec]
+      label_str = String.replace(label_str, ~r/\[\]$/, "")
+    else
+      processed_subspec = [{:is_list, false} | processed_subspec]
+    end
+
+    processed_label = String.to_atom(label_str)
+
+    [{processed_label, [{:path, String.to_char_list(path)} | processed_subspec]}]
   end
 
-  def value(nodes) when is_list(nodes) do
-    Enum.map nodes, &value/1
+  @doc """
+  converts doc to a map, defined by spec
+  """
+  def to_map(doc, spec) when is_bitstring(doc) do
+    doc |> parse |> to_map(spec)
   end
 
-  def value(node) do
+  def to_map(parent, spec) do
+    _to_map(parent, process_spec(spec))
+  end
+
+  defp _to_map(parent, [{label, spec}]) do
+    current_node = :xmerl_xpath.string(spec[:path], parent)
+
+    if spec[:is_list] do
+      if spec[:is_value] do
+        if length(spec[:children]) == 0 do
+          Dict.put(%{}, label, Enum.map(current_node, fn(item) -> _get_value(item) end))
+        else
+          raise "Can't return value and get children"
+        end
+      else
+        if length(spec[:children]) == 0 do
+          Dict.put(%{}, label, current_node)
+        else
+          Dict.put(%{}, label, Enum.map(current_node, fn(node) -> _to_map(node, spec[:children]) end))
+        end
+      end
+    else
+      current_node = List.first(current_node)
+      if spec[:is_value] do
+        if length(spec[:children]) == 0 do
+          Dict.put(%{}, label, _get_value(current_node))
+        else
+          raise "Can't return value and get children"
+        end
+      else
+        if length(spec[:children]) == 0 do
+          Dict.put(%{}, label, current_node)
+        else
+          Dict.put(%{}, label, _to_map(current_node, spec[:children]))
+        end
+      end
+    end
+  end
+
+  defp _to_map(parent, spec) do
+    Enum.reduce(spec, %{}, fn (s, result) -> Dict.merge(result, _to_map(parent, [s])) end)
+  end
+
+  defp _get_value(node) do
     cond do
       Record.record? node, :xmlText ->
         xmlText(node, :value)
@@ -56,33 +141,35 @@ defmodule XmlSugar do
     end
   end
 
-  def value(nodes, mappings) when is_list(nodes) do
-    Enum.map nodes, &(value(&1, mappings))
+  @doc """
+  same as
+    parent |> to_map("&temp": spec) |> Map.get(:temp)
+  """
+  def to_value(parent, spec) do
+    parent |> to_map("&temp": spec) |> Map.get(:temp)
   end
 
-  def value(node, mappings) do
-    mappings
-    |> Enum.reverse
-    |> Enum.reduce([], fn({label, path}, result) ->
-      temp = node |> xpath(path) |> value
-      case length(temp) do
-        1 -> [{label, hd(temp)} | result]
-        0 -> [{label, nil} | result]
-        _ -> [{label, temp} | result]
-      end
-    end)
+  @doc """
+  same as
+    parent |> to_map("temp": spec) |> Map.get(:temp)
+  """
+  def to_node(parent, spec) do
+    parent |> to_map("temp": spec) |> Map.get(:temp)
   end
 
-  def update(collection, mappings) do
-    Enum.map(collection, fn (item) ->
-      _update(item, mappings)
-    end)
+  @doc """
+  same as
+    parent |> to_map("temp[]": spec) |> Map.get(:temp)
+  """
+  def to_list(parent, spec) do
+    parent |> to_map("temp[]": spec) |> Map.get(:temp)
   end
 
-  defp _update(item, mappings) do
-    Enum.reduce(mappings, item, fn ({label, specs}, item) ->
-      {_, item} = get_and_update_in(item[label], fn (i) -> {i, i |> value(specs)} end)
-      item
-    end)
+  @doc """
+  same as
+    parent |> to_map("&temp[]": spec) |> Map.get(:temp)
+  """
+  def to_list_of_values(parent, spec) do
+    parent |> to_map("&temp[]": spec) |> Map.get(:temp)
   end
 end
