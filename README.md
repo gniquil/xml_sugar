@@ -58,12 +58,12 @@ We can do the following
 ```elixir
 result = xml_doc # as defined above
 |> XmlSugar.to_map(
-  "matchups[]": [
-    "//matchups/matchup",
-    "&name": "./name/text()",
+  matchups: [
+    ~x"//matchups/matchup"l,
+    name: ~x"./name/text()",
     winner: [
-      ".//team/id[.=ancestor::matchup/@winner-id]/..",
-      "&name": "./name/text()"
+      ~x".//team/id[.=ancestor::matchup/@winner-id]/..",
+      name: ~x"./name/text()"
     ]
   ]
 )
@@ -77,7 +77,7 @@ assert result == %{
 }
 
 # or something simple... get the list of match names
-result = xml_doc |> XmlSugar.to_list_of_values("//matchup/name/text()")
+result = xml_doc |> XmlSugar.get(~x"//matchup/name/text()"l)
 assert result == ['Match One', 'Match Two', 'Match Three']
 
 ```
@@ -85,6 +85,8 @@ assert result == ['Match One', 'Match Two', 'Match Three']
 ## How to Use
 
 ### Overview
+
+(TODO, outdated, need to be rewritten)
 
 Generally, all you need to do is use `to_map/2` as follows `to_map(doc, spec)` where `doc` is a string, char_list, or xml record
 as specified in `:xmerl`. `to_map/2` returns a `map`.

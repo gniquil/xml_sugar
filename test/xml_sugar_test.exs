@@ -15,26 +15,41 @@ defmodule XmlSugarTest do
     assert xmlElement(result, :name) == :html
   end
 
+  test "xpath sigil" do
+    # default = node
+    assert ~x"//header/text()" == {:xpath, "//header/text()", ''}
+
+    # value
+    assert ~x"//header/text()"e == {:xpath, "//header/text()", 'e'}
+
+    # list (node)
+    assert ~x"//header/text()"l == {:xpath, "//header/text()", 'l'}
+
+    # list (value)
+    assert ~x"//header/text()"el == {:xpath, "//header/text()", 'el'}
+    assert ~x"//header/text()"le == {:xpath, "//header/text()", 'el'}
+  end
+
   test "spec processing modifiers" do
-    assert process_spec(first_p: "//p") == [first_p: [path: '//p', is_list: false, is_value: false, children: []]]
-    assert process_spec("&first_p": "//p") == [first_p: [path: '//p', is_list: false, is_value: true, children: []]]
-    assert process_spec("first_p[]": "//p") == [first_p: [path: '//p', is_list: true, is_value: false, children: []]]
-    assert process_spec("&first_p[]": "//p") == [first_p: [path: '//p', is_list: true, is_value: true, children: []]]
+    assert process_spec(first_p: ~x"//p") == [first_p: [path: '//p', is_list: false, is_value: true, children: []]]
+    assert process_spec(first_p: ~x"//p"e) == [first_p: [path: '//p', is_list: false, is_value: false, children: []]]
+    assert process_spec(first_p: ~x"//p"l) == [first_p: [path: '//p', is_list: true, is_value: true, children: []]]
+    assert process_spec(first_p: ~x"//p"el) == [first_p: [path: '//p', is_list: true, is_value: false, children: []]]
   end
 
   test "spec processing nested" do
     result = process_spec(
-      "&first_p[]": [
-        "//p",
-        "&name": "./name",
-        "&key": "./key"
+      first_p: [
+        ~x"//p"l,
+        name: ~x"./name",
+        key: ~x"./key"
       ],
-      "&second_p": "//p/text()",
-      "third_p": [
-        "//p",
-        "teams[]": [
-          ".//team",
-          "&name": "./name/text()"
+      second_p: ~x"//p/text()",
+      third_p: [
+        ~x"//p",
+        teams: [
+          ~x".//team"l,
+          name: ~x"./name/text()"
         ]
       ]
     )
@@ -68,12 +83,12 @@ defmodule XmlSugarTest do
       third_p: [
         path: '//p',
         is_list: false,
-        is_value: false,
+        is_value: true,
         children: [
           teams: [
             path: './/team',
             is_list: true,
-            is_value: false,
+            is_value: true,
             children: [
               name: [
                 path: './name/text()',
@@ -90,25 +105,25 @@ defmodule XmlSugarTest do
 
   test "to_map single level", %{simple: doc} do
     result = doc
-    |> to_map("header": "//header/text()")
+    |> to_map(header: ~x"//header/text()"e)
     assert result == %{
       header: {:xmlText, [header: 2, div: 8, body: 4, html: 1], 1, [], 'Content Header', :text}
     }
 
     result = doc
-    |> to_map("&header": "//header/text()")
+    |> to_map(header: ~x"//header/text()")
     assert result == %{header: 'Content Header'}
 
     result = doc
-    |> to_map("&badges[]": "//span[contains(@class,'badge')][@data-attr='first-half']/text()")
+    |> to_map(badges: ~x"//span[contains(@class,'badge')][@data-attr='first-half']/text()"l)
     assert result == %{
       badges: ['One', 'Two', 'Three', 'Four', 'Five']
     }
 
     result = doc
     |> to_map(
-      "&header": "//header/text()",
-      "&badges[]": "//span[contains(@class,'badge')][@data-attr='first-half']/text()"
+      header: ~x"//header/text()",
+      badges: ~x"//span[contains(@class,'badge')][@data-attr='first-half']/text()"l
     )
     assert result == %{
       header: 'Content Header',
@@ -119,9 +134,9 @@ defmodule XmlSugarTest do
   test "to_map multiple level", %{simple: doc} do
     result = doc
     |> to_map(
-      "content": [
-        "//div[@id='content']",
-        "&badges[]": "//span[contains(@class,'badge')][@data-attr!='first-half']/text()"
+      content: [
+        ~x"//div[@id='content']",
+        badges: ~x"//span[contains(@class,'badge')][@data-attr!='first-half']/text()"l
       ]
     )
     assert result == %{
@@ -132,10 +147,10 @@ defmodule XmlSugarTest do
 
     result = doc
     |> to_map(
-      "&header": "//header/text()",
-      "content": [
-        "//div[@id='content']",
-        "&first_non_first_half_badge": "//span[contains(@class,'badge')][@data-attr!='first-half']/text()"
+      header: ~x"//header/text()",
+      content: [
+        ~x"//div[@id='content']",
+        first_non_first_half_badge: ~x"//span[contains(@class,'badge')][@data-attr!='first-half']/text()"
       ]
     )
     assert result == %{
@@ -148,10 +163,10 @@ defmodule XmlSugarTest do
 
   test "reuse returned nodes", %{simple: doc} do
     result = doc
-    |> to_map("list[]": "//li")
+    |> to_map(list: ~x"//li"l)
     |> Map.get(:list)
     |> Enum.map(fn (li_node) ->
-      to_map(li_node, "&text": "./text()") |> Map.get(:text)
+      to_map(li_node, text: ~x"./text()") |> Map.get(:text)
     end)
     assert result == ['First', 'Second', 'Third', 'Forth']
   end
@@ -159,10 +174,10 @@ defmodule XmlSugarTest do
   test "working with attributes", %{simple: doc} do
     result = doc
     |> to_map(
-      "list[]": [
-        "//body/ul/li",
-        "&class": "./@class",
-        "&data_index": "./@data-index"
+      list: [
+        ~x"//body/ul/li"l,
+        class: ~x"./@class",
+        data_index: ~x"./@data-index"
       ]
     )
     assert result == %{
@@ -176,9 +191,9 @@ defmodule XmlSugarTest do
     result = doc
     |> to_map(
       list_item_with_data_index: [
-        "//body/ul/li/@data-index/..",
-        "&class": "./@class",
-        "&data_index": "./@data-index"
+        ~x"//body/ul/li/@data-index/..",
+        class: ~x"./@class",
+        data_index: ~x"./@data-index"
       ]
     )
     assert result == %{
@@ -187,13 +202,13 @@ defmodule XmlSugarTest do
   end
 
   test "convenience functions", %{simple: doc} do
-    result = doc |> to_node("//header/text()")
-    assert result == {:xmlText, [header: 2, div: 8, body: 4, html: 1], 1, [], 'Content Header', :text}
-
-    result = doc |> to_value("//header/text()")
+    result = doc |> get(~x"//header/text()")
     assert result == 'Content Header'
 
-    result = doc |> to_list("//span[contains(@class,'badge')][@data-attr='first-half']/text()")
+    result = doc |> get(~x"//header/text()"e)
+    assert result == {:xmlText, [header: 2, div: 8, body: 4, html: 1], 1, [], 'Content Header', :text}
+
+    result = doc |> get(~x"//span[contains(@class,'badge')][@data-attr='first-half']/text()"el)
     assert result == [
       {:xmlText, [span: 4, div: 8, body: 4, html: 1], 1, [], 'One', :text},
       {:xmlText, [span: 6, div: 8, body: 4, html: 1], 1, [], 'Two', :text},
@@ -202,34 +217,34 @@ defmodule XmlSugarTest do
       {:xmlText, [span: 12, div: 8, body: 4, html: 1], 1, [], 'Five', :text}
     ]
 
-    result = doc |> to_list_of_values("//span[contains(@class,'badge')][@data-attr='first-half']/text()")
+    result = doc |> get(~x"//span[contains(@class,'badge')][@data-attr='first-half']/text()"l)
     assert result == ['One', 'Two', 'Three', 'Four', 'Five']
 
 
-    result = doc |> to_list("//li") |> Enum.map &(&1 |> to_value("./text()"))
+    result = doc |> get(~x"//li"l) |> Enum.map &(&1 |> get(~x"./text()"))
     assert result == ['First', 'Second', 'Third', 'Forth']
   end
 
   test "complex parsing", %{complex: doc} do
     result = doc
     |> to_map(
-      "matchups[]": [
-        "//matchups/matchup/is_tied[contains(., '0')]/..",
-        "&week": "./week/text()",
-        "winner": [
-          "./teams/team/team_key[.=ancestor::matchup/winner_team_key]/..",
-          "&name": "./name/text()",
-          "&key": "./team_key/text()"
+      matchups: [
+        ~x"//matchups/matchup/is_tied[contains(., '0')]/.."l,
+        week: ~x"./week/text()",
+        winner: [
+          ~x"./teams/team/team_key[.=ancestor::matchup/winner_team_key]/..",
+          name: ~x"./name/text()",
+          key: ~x"./team_key/text()"
         ],
-        "loser": [
-          "./teams/team/team_key[.!=ancestor::matchup/winner_team_key]/..",
-          "&name": "./name/text()",
-          "&key": "./team_key/text()"
+        loser: [
+          ~x"./teams/team/team_key[.!=ancestor::matchup/winner_team_key]/..",
+          name: ~x"./name/text()",
+          key: ~x"./team_key/text()"
         ],
-        "teams[]": [
-          "./teams/team",
-          "&name": "./name/text()",
-          "&key": "./team_key/text()"
+        teams: [
+          ~x"./teams/team"l,
+          name: ~x"./name/text()",
+          key: ~x"./team_key/text()"
         ]
       ]
     )
@@ -277,25 +292,25 @@ defmodule XmlSugarTest do
 
   test "complex parsing and processing", %{complex: doc} do
     result = doc
-    |> to_list([
-      "//matchups/matchup/is_tied[contains(., '0')]/..",
-      "&week": "./week/text()",
-      "winner": [
-        "./teams/team/team_key[.=ancestor::matchup/winner_team_key]/..",
-        "&name": "./name/text()",
-        "&key": "./team_key/text()"
+    |> get(
+      ~x"//matchups/matchup/is_tied[contains(., '0')]/.."l,
+      week: ~x"./week/text()",
+      winner: [
+        ~x"./teams/team/team_key[.=ancestor::matchup/winner_team_key]/..",
+        name: ~x"./name/text()",
+        key: ~x"./team_key/text()"
       ],
-      "loser": [
-        "./teams/team/team_key[.!=ancestor::matchup/winner_team_key]/..",
-        "&name": "./name/text()",
-        "&key": "./team_key/text()"
+      loser: [
+        ~x"./teams/team/team_key[.!=ancestor::matchup/winner_team_key]/..",
+        name: ~x"./name/text()",
+        key: ~x"./team_key/text()"
       ],
       "teams[]": [
-        "./teams/team",
-        "&name": "./name/text()",
-        "&key": "./team_key/text()"
+        ~x"./teams/team"l,
+        name: ~x"./name/text()",
+        key: ~x"./team_key/text()"
       ]
-    ])
+    )
     |> Enum.reduce %{}, fn(matchup, stat) ->
       winner_name = matchup[:winner][:name]
       loser_name = matchup[:loser][:name]
@@ -324,12 +339,12 @@ defmodule XmlSugarTest do
     doc = File.read!("test/files/readme_example.xml")
     result = doc
     |> XmlSugar.to_map(
-      "matchups[]": [
-        "//matchups/matchup",
-        "&name": "./name/text()",
+      matchups: [
+        ~x"//matchups/matchup"l,
+        name: ~x"./name/text()",
         winner: [
-          ".//team/id[.=ancestor::matchup/@winner-id]/..",
-          "&name": "./name/text()"
+          ~x".//team/id[.=ancestor::matchup/@winner-id]/..",
+          name: ~x"./name/text()"
         ]
       ]
     )
@@ -342,26 +357,26 @@ defmodule XmlSugarTest do
       ]
     }
 
-    result = doc |> XmlSugar.to_list_of_values("//matchup/name/text()")
+    result = doc |> get(~x"//matchup/name/text()"l)
     assert result == ['Match One', 'Match Two', 'Match Three']
 
     result = simple_doc |> to_map(
-      "html": [
-        "//html",
-        "body": [
-          "./body",
-          "&p": "./p[1]/text()",
-          "first_list[]": [
-            "./ul/li",
-            "&class": "./@class",
-            "&data_attr": "./@data-attr",
-            "&text": "./text()"
+      html: [
+        ~x"//html",
+        body: [
+          ~x"./body",
+          p: ~x"./p[1]/text()",
+          first_list: [
+            ~x"./ul/li"l,
+            class: ~x"./@class",
+            data_attr: ~x"./@data-attr",
+            text: ~x"./text()"
           ],
-          "&second_list[]": "./div//li/text()"
+          second_list: ~x"./div//li/text()"l
         ]
       ],
-      "&odd_badges_class_values[]": "//span[contains(@class, 'odd')]/@class",
-      "&special_match": "//li[@class=ancestor::body/special_match_key]/text()"
+      odd_badges_class_values: ~x"//span[contains(@class, 'odd')]/@class"l,
+      special_match: ~x"//li[@class=ancestor::body/special_match_key]/text()"
     )
 
     assert result == %{
@@ -380,4 +395,5 @@ defmodule XmlSugarTest do
       special_match: 'First'
     }
   end
+
 end

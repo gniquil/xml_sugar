@@ -29,6 +29,10 @@ defmodule XmlSugar do
     parsed_doc
   end
 
+  def sigil_x(path, modifier \\ '') do
+    {:xpath, path, Enum.sort(modifier)}
+  end
+
   @doc """
   `label` has to be "&...", "...[]", "&...[]", or "..."
   `&`: get the value of the node (only works when the node is `xmlText`, `xmlComment`, `xmlPI`, or `xmlAttribute`)
@@ -57,23 +61,27 @@ defmodule XmlSugar do
   end
 
   defp _process_spec(label, path, processed_subspec) do
-    label_str = Atom.to_string(label)
-    if String.match?(label_str, ~r/^\&/) do
-      processed_subspec = [{:is_value, true} | processed_subspec]
-      label_str = String.replace(label_str, ~r/^\&/, "")
-    else
+    # label_str = Atom.to_string(label)
+    {:xpath, p, m} = path
+    if ?e in m do
+      # if String.match?(label_str, ~r/^\&/) do
       processed_subspec = [{:is_value, false} | processed_subspec]
+      # label_str = String.replace(label_str, ~r/^\&/, "")
+    else
+      processed_subspec = [{:is_value, true} | processed_subspec]
     end
-    if String.match?(label_str, ~r/\[\]$/) do
+    if ?l in m do
+      # if String.match?(label_str, ~r/\[\]$/) do
       processed_subspec = [{:is_list, true} | processed_subspec]
-      label_str = String.replace(label_str, ~r/\[\]$/, "")
+      # label_str = String.replace(label_str, ~r/\[\]$/, "")
     else
       processed_subspec = [{:is_list, false} | processed_subspec]
     end
 
-    processed_label = String.to_atom(label_str)
+    # processed_label = String.to_atom(label_str)
 
-    [{processed_label, [{:path, String.to_char_list(path)} | processed_subspec]}]
+    # [{processed_label, [{:path, String.to_char_list(path)} | processed_subspec]}]
+    [{label, [{:path, String.to_char_list(p)} | processed_subspec]}]
   end
 
   @doc """
@@ -92,10 +100,12 @@ defmodule XmlSugar do
 
     if spec[:is_list] do
       if spec[:is_value] do
+        # Dict.put(%{}, label, Enum.map(current_node, fn(item) -> _get_value(item) end))
         if length(spec[:children]) == 0 do
           Dict.put(%{}, label, Enum.map(current_node, fn(item) -> _get_value(item) end))
         else
-          raise "Can't return value and get children"
+          # raise "Can't return value and get children"
+          Dict.put(%{}, label, Enum.map(current_node, fn(node) -> _to_map(node, spec[:children]) end))
         end
       else
         if length(spec[:children]) == 0 do
@@ -107,10 +117,12 @@ defmodule XmlSugar do
     else
       current_node = List.first(current_node)
       if spec[:is_value] do
+        # Dict.put(%{}, label, _get_value(current_node))
         if length(spec[:children]) == 0 do
           Dict.put(%{}, label, _get_value(current_node))
         else
-          raise "Can't return value and get children"
+          # raise "Can't return value and get children"
+          Dict.put(%{}, label, _to_map(current_node, spec[:children]))
         end
       else
         if length(spec[:children]) == 0 do
@@ -141,35 +153,12 @@ defmodule XmlSugar do
     end
   end
 
-  @doc """
-  same as
-    parent |> to_map("&temp": spec) |> Map.get(:temp)
-  """
-  def to_value(parent, spec) do
-    parent |> to_map("&temp": spec) |> Map.get(:temp)
+  def get(parent, path, subspec) do
+    spec = [path | subspec]
+    parent |> to_map(temp: spec) |> Map.get(:temp)
   end
 
-  @doc """
-  same as
-    parent |> to_map("temp": spec) |> Map.get(:temp)
-  """
-  def to_node(parent, spec) do
-    parent |> to_map("temp": spec) |> Map.get(:temp)
-  end
-
-  @doc """
-  same as
-    parent |> to_map("temp[]": spec) |> Map.get(:temp)
-  """
-  def to_list(parent, spec) do
-    parent |> to_map("temp[]": spec) |> Map.get(:temp)
-  end
-
-  @doc """
-  same as
-    parent |> to_map("&temp[]": spec) |> Map.get(:temp)
-  """
-  def to_list_of_values(parent, spec) do
-    parent |> to_map("&temp[]": spec) |> Map.get(:temp)
+  def get(parent, path) do
+    parent |> to_map(temp: path) |> Map.get(:temp)
   end
 end
