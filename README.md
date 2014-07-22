@@ -62,7 +62,7 @@ doc = "..." # as above
 result = doc |> XmlSugar.get(~x"//matchup/name/text()") # `x` marks sigil for (x)path
 assert result == 'Match One'
 
-# get the xml record of the name fo the first match
+# get the xml record of the name of the first match
 result = doc |> XmlSugar.get(~x"//matchup/name"e) # `e` is the modifier for (e)ntity
 assert result == {:xmlElement, :name, :name, [], {:xmlNamespace, [], []},
         [matchup: 2, matchups: 2, game: 1], 2, [],
@@ -88,42 +88,6 @@ assert result == [
   %{name: 'Match Two', winner: %{name: 'Team Two'}},
   %{name: 'Match Three', winner: %{name: 'Team One'}}
 ]
-
-# get a map with lots of nesting
-result = simple_doc |> XmlSugar.to_map(
-  html: [
-    ~x"//html",
-    body: [
-      ~x"./body",
-      p: ~x"./p[1]/text()",
-      first_list: [
-        ~x"./ul/li"l,
-        class: ~x"./@class",
-        data_attr: ~x"./@data-attr",
-        text: ~x"./text()"
-      ],
-      second_list: ~x"./div//li/text()"l
-    ]
-  ],
-  odd_badges_class_values: ~x"//span[contains(@class, 'odd')]/@class"l,
-  special_match: ~x"//li[@class=ancestor::body/special_match_key]/text()"
-)
-assert result == %{
-  html: %{
-    body: %{
-      p: 'Neato',
-      first_list: [
-        %{class: 'first star', data_attr: nil, text: 'First'},
-        %{class: 'second', data_attr: nil, text: 'Second'},
-        %{class: 'third', data_attr: nil, text: 'Third'}
-      ],
-      second_list: ['Forth']
-    }
-  },
-  odd_badges_class_values: ['first badge odd', 'badge odd'],
-  special_match: 'First'
-}
-
 ```
 
 ## How to Use
@@ -154,8 +118,8 @@ iex> doc |> get(~x"//li"l)
 To force `XmlSugar.get/2` to return the node itself (the erlang record), use the `e` modifier. For example:
 
 ```elixir
-  iex> ~x"//head/title/text"/e
-  {:xmlText, ...}
+iex> doc |> get(~x"//head/title/text"e)
+{:xmlText, ...}
 ```
 
 You can combine the above two modifiers to get the full list of entities.
@@ -171,10 +135,8 @@ you can chain them, e.g.
 
 ```elixir
 iex> doc |> get(~x"//li"l) |> Enum.map fn (li_node) ->
-  %{
-    name: get(li_node, ~x"./name/text()"),
-    age: get(li_node, ~x"./age/text()")
-  }
+  %{name: get(li_node, ~x"./name/text()"),
+    age: get(li_node, ~x"./age/text()")}
 end
 ```
 
