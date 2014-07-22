@@ -56,167 +56,59 @@ Given a xml document such as below
 We can do the following
 
 ```elixir
-result = xml_doc # as defined above
-|> XmlSugar.to_map(
-  matchups: [
-    ~x"//matchups/matchup"l,
-    name: ~x"./name/text()",
-    winner: [
-      ~x".//team/id[.=ancestor::matchup/@winner-id]/..",
-      name: ~x"./name/text()"
-    ]
-  ]
-)
+doc = "..." # as above
 
-assert result == %{
-  matchups: [
-    %{name: 'Game One', winner: %{name: 'Team One'}},
-    %{name: 'Game Two', winner: %{name: 'Team Two'}},
-    %{name: 'Game Three', winner: %{name: 'Team One'}}
-  ]
-}
+# get the name of the first match
+result = doc |> XmlSugar.get(~x"//matchup/name/text()") # `x` marks sigil for (x)path
+assert result == 'Match One'
 
-# or something simple... get the list of match names
-result = xml_doc |> XmlSugar.get(~x"//matchup/name/text()"l)
+# get the xml record of the name fo the first match
+result = doc |> XmlSugar.get(~x"//matchup/name"e) # `e` is the modifier for (e)ntity
+assert result == {:xmlElement, :name, :name, [], {:xmlNamespace, [], []},
+        [matchup: 2, matchups: 2, game: 1], 2, [],
+        [{:xmlText, [name: 2, matchup: 2, matchups: 2, game: 1], 1, [],
+          'Match One', :text}], [],
+        '/Users/frank/projects/elixir/xml_sugar', :undeclared}
+
+# get the full list of matchup name
+result = doc |> XmlSugar.get(~x"//matchup/name/text()"l) # `l` stands for (l)ist
 assert result == ['Match One', 'Match Two', 'Match Three']
 
-```
+# get a list of matchups with different map structure
+result = doc |> XmlSugar.get(
+  ~x"//matchups/matchup"l,
+  name: ~x"./name/text()",
+  winner: [
+    ~x".//team/id[.=ancestor::matchup/@winner-id]/..",
+    name: ~x"./name/text()"
+  ]
+)
+assert result == [
+  %{name: 'Match One', winner: %{name: 'Team One'}},
+  %{name: 'Match Two', winner: %{name: 'Team Two'}},
+  %{name: 'Match Three', winner: %{name: 'Team One'}}
+]
 
-## How to Use
-
-### Overview
-
-(TODO, outdated, need to be rewritten)
-
-Generally, all you need to do is use `to_map/2` as follows `to_map(doc, spec)` where `doc` is a string, char_list, or xml record
-as specified in `:xmerl`. `to_map/2` returns a `map`.
-
-### Mapping from xml to Map
-
-The second argument to `to_map/2`, should be a keyword list that can be in either of the following formats:
-
-```elixir
-XmlSugar.to_map(doc, label1: path1) # where label is a string or atom and path is a xpath string
-
-XmlSugar.to_map(doc, label1: [path1, label11: path11, label12: path12, ...]) # where label is a string or atom and path is a string
-```
-
-The structure above can be nested arbitrarily deep.
-
-### Label Types
-
-As you saw earlier, the labels have strange symbols `&` and `[]`. This is to help us specify what type of result the mapping
-will return.
-
-- `&...` indicates value. Without this, mapping will return tuples that conform to Record definitions specified in xmerl. Note
-that `&` is only valid if the path correspond to `xmlText`, `xmlComment`, `xmlPI`, `xmlAttribute`. This is why as shown above,
-you need to use "./text()" to pull out the text node to use with `&`. Also you may want to try "./@some-attr" with `&` to get
-the value of the attributes.
-
-- `...[]` indicates list. With out this, you will only get the first node of the matched nodes.
-
-## API
-
-### `to_map/2`
-
-This is the main function, probably the only one you'll ever need. Explained above.
-
-### Helper Methods
-
-In case you are lazy, you can use the following to get to what you want without dealing with `map`
-
-#### `to_node/2`
-
-same as `doc |> to_map("temp": spec) |> Map.get(:temp)`
-
-#### `to_value/2`
-
-same as `doc |> to_map("&temp": spec) |> Map.get(:temp)`
-
-#### `to_list/2`
-
-same as `doc |> to_map("temp[]": spec) |> Map.get(:temp)`
-
-#### `to_list_of_values/2`
-
-same as `doc |> to_map("&temp[]": spec) |> Map.get(:temp)`
-
-
-## Examples
-
-```xml
-<?xml version="1.05" encoding="UTF-8"?>
-<html>
-  <head>
-    <title>XML Parsing</title>
-  </head>
-  <body>
-    <p>Neato</p>
-    <ul>
-      <li class="first star" data-index="1">First</li>
-      <li class="second">Second</li>
-      <li class="third">Third</li>
-    </ul>
-    <div>
-      <ul>
-        <li>Forth</li>
-      </ul>
-    </div>
-    <div id="content">
-      <header>Content Header</header>
-      <span class="first badge odd" data-attr="first-half">One</span>
-      <span class="badge" data-attr="first-half">Two</span>
-      <span class="badge odd" data-attr="first-half">Three</span>
-      <span class="badge" data-attr="first-half">Four</span>
-      <span class="badge" data-attr="first-half">Five</span>
-      <span class="badge">Six</span>
-      <span class="badge">Seven</span>
-      <span class="badge">Eight</span>
-      <span class="badge">Nine</span>
-      <span class="badge">Ten</span>
-      <p class='nested-paragraph'>Hello there. <a>link</a></p>
-      <p class="padded-paragraph">Another one. <a>link2</a> More stuff</p>
-    </div>
-    <special_match_key>first star</special_match_key>
-  </body>
-</html>
-```
-
-```iex
-iex> doc = ... # as above
-iex> import XmlSugar
-
-iex> doc |> to_list_of_values("//li/text()")
-['First', 'Second','Third', 'Forth']
-
-iex> doc |> to_value("//li[@class='second']/text()")
-'Second'
-
-iex> doc |> to_node("//li[2]/text()")
-{:xmlText, [li: 4, ul: 4, body: 4, html: 1], 1, [], 'Second', :text}
-
-iex> doc |> to_map("&list_of_items[]": "//li/text()")
-%{list_of_items: ['First', 'Second', 'Third', 'Forth']}
-
-iex> doc |> to_map(
-...>  "html": [
-...>    "//html",
-...>    "body": [
-...>      "./body",
-...>      "&p": "./p[1]/text()",
-...>      "first_list[]": [
-...>        "./ul/li",
-...>        "&class": "./@class",
-...>        "&data_attr": "./@data-attr",
-...>        "&text": "./text()"
-...>      ],
-...>      "&second_list[]": "./div//li/text()"
-...>    ]
-...>  ],
-...>  "&odd_badges_class_values[]": "//span[contains(@class, 'odd')]/@class",
-...>  "&special_match": "//li[@class=ancestor::body/special_match_key]/text()"
-...>)
-%{
+# get a map with lots of nesting
+result = simple_doc |> XmlSugar.to_map(
+  html: [
+    ~x"//html",
+    body: [
+      ~x"./body",
+      p: ~x"./p[1]/text()",
+      first_list: [
+        ~x"./ul/li"l,
+        class: ~x"./@class",
+        data_attr: ~x"./@data-attr",
+        text: ~x"./text()"
+      ],
+      second_list: ~x"./div//li/text()"l
+    ]
+  ],
+  odd_badges_class_values: ~x"//span[contains(@class, 'odd')]/@class"l,
+  special_match: ~x"//li[@class=ancestor::body/special_match_key]/text()"
+)
+assert result == %{
   html: %{
     body: %{
       p: 'Neato',
@@ -233,3 +125,81 @@ iex> doc |> to_map(
 }
 
 ```
+
+## How to Use
+
+Generally, all you need to do is use `get/2`, where first argument being a `string`, `char_list`, or a xml record
+as specified in `:xmerl` (see https://github.com/otphub/xmerl/blob/master/include/xmerl.hrl). second argment being
+either a xpath tuple, i.e. ~x"//some/path/to/your/node/or/nodes" or
+a list with first item being a xpath, the rest being in a keyword list format, to specify your mapping.
+
+### Xpath sigil and modifiers
+
+Given a xpath string such as "//head/title",
+
+```elixir
+iex> ~x"//head/title/text()"e
+{:xpath, "//head/title/text()", 'e'}
+```
+
+By default `XmlSugar.get/2` will only return the first node that matches the xpath, and automatically convert it
+to the value of the node if the node is a text node, attribute node, comment node, or processing instruction.
+
+To get all occurences, use the `l` modifier
+
+```elixir
+iex> doc |> get(~x"//li"l)
+```
+
+To force `XmlSugar.get/2` to return the node itself (the erlang record), use the `e` modifier. For example:
+
+```elixir
+  iex> ~x"//head/title/text"/e
+  {:xmlText, ...}
+```
+
+You can combine the above two modifiers to get the full list of entities.
+
+```elixir
+iex> doc |> get(~x"//li/text()"el)
+```
+
+### Chaining
+
+Note that since often what you get is a node or a list of nodes, and the input to `get/2` can also be a node,
+you can chain them, e.g.
+
+```elixir
+iex> doc |> get(~x"//li"l) |> Enum.map fn (li_node) ->
+  %{
+    name: get(li_node, ~x"./name/text()"),
+    age: get(li_node, ~x"./age/text()")
+  }
+end
+```
+
+### Mapping to a structure
+
+Since the previous example is such a common use case, XmlSugar allows you just simply do the following
+
+```elixir
+iex> doc |> get(~x"//li"l, name: ~x"./name/text()", age: ~x"./age/text()")
+```
+
+### Nesting
+
+But what you want is sometimes more complex than just that, XmlSugar thus also allows nesting
+
+```elixir
+iex> doc |> get(
+  ~x"//li"l,
+  name: [
+    ~x"./name",
+    first: ~x"./first/text()",
+    last: ~x"./last/text()"
+  ],
+  age: ~x"./age/text()"
+)
+```
+
+For more examples, please take a look at the tests.

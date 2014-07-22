@@ -337,30 +337,40 @@ defmodule XmlSugarTest do
 
   test "read me examples", %{simple: simple_doc} do
     doc = File.read!("test/files/readme_example.xml")
-    result = doc
-    |> XmlSugar.to_map(
-      matchups: [
-        ~x"//matchups/matchup"l,
-        name: ~x"./name/text()",
-        winner: [
-          ~x".//team/id[.=ancestor::matchup/@winner-id]/..",
-          name: ~x"./name/text()"
-        ]
-      ]
-    )
 
-    assert result == %{
-      matchups: [
-        %{name: 'Match One', winner: %{name: 'Team One'}},
-        %{name: 'Match Two', winner: %{name: 'Team Two'}},
-        %{name: 'Match Three', winner: %{name: 'Team One'}}
-      ]
-    }
+    # get the name of the first match
+    result = doc |> XmlSugar.get(~x"//matchup/name/text()") # `x` marks sigil for (x)path
+    assert result == 'Match One'
 
-    result = doc |> get(~x"//matchup/name/text()"l)
+    # get the xml record of the name fo the first match
+    result = doc |> XmlSugar.get(~x"//matchup/name"e) # `e` is the modifier for (e)ntity
+    assert result == {:xmlElement, :name, :name, [], {:xmlNamespace, [], []},
+            [matchup: 2, matchups: 2, game: 1], 2, [],
+            [{:xmlText, [name: 2, matchup: 2, matchups: 2, game: 1], 1, [],
+              'Match One', :text}], [],
+            '/Users/frank/projects/elixir/xml_sugar', :undeclared}
+
+    # get the full list of matchup name
+    result = doc |> XmlSugar.get(~x"//matchup/name/text()"l) # `l` stands for (l)ist
     assert result == ['Match One', 'Match Two', 'Match Three']
 
-    result = simple_doc |> to_map(
+    # get a list of matchups with different map structure
+    result = doc |> XmlSugar.get(
+      ~x"//matchups/matchup"l,
+      name: ~x"./name/text()",
+      winner: [
+        ~x".//team/id[.=ancestor::matchup/@winner-id]/..",
+        name: ~x"./name/text()"
+      ]
+    )
+    assert result == [
+      %{name: 'Match One', winner: %{name: 'Team One'}},
+      %{name: 'Match Two', winner: %{name: 'Team Two'}},
+      %{name: 'Match Three', winner: %{name: 'Team One'}}
+    ]
+
+    # get a map with lots of nesting
+    result = simple_doc |> XmlSugar.to_map(
       html: [
         ~x"//html",
         body: [
