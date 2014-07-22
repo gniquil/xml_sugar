@@ -1,7 +1,7 @@
 XmlSugar
 ========
 
-This is a simple Elixir sugar wrapper around `:xmerl`. What it adds is css selectors.
+This is a simple Elixir sugar wrapper around `:xmerl`.
 
 ## Usage
 
