@@ -1,3 +1,9 @@
+This project is no longer maintained. Please use `SweetXml` instead.
+
+https://github.com/gniquil/sweet_xml
+
+Thanks for the feedback.
+
 XmlSugar
 ========
 
